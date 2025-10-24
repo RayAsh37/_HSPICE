@@ -1,0 +1,28 @@
+* CMOS Inverter
+
+* Define the technology model parameters
+.model nmos nmos 
+.model pmos pmos
+
+* Circuit elements
+Vdd vdd 0 DC 1V ; Power supply voltage
+Vin in 0 PULSE(0 1 0 1n 1n 10n 20n); Input voltage (will be varied)
+
+* Transistor instances
+M1 out in vdd vdd pmos L=45n W=240n ; PMOS transistor
+M2 out in 0 0 nmos L=45n W=120n ; NMOS transistor
+
+* Load capacitance
+*Cload out 0 1pF ; Load capacitor
+
+* DC Analysis
+.dc Vin 0 1 0.1 ; Sweep input voltage from 0 to 1V in steps of 0.1V
+
+* Transient analysis (optional)
+.tran 1n 100n ; Transient analysis for 20 ns
+.control
+    run ; Run the simulation
+    plot V(out) V(in) ; Plot output and input voltages
+.endc
+.end
+
