@@ -1,0 +1,45 @@
+* CMOS Inverter with Parametric Analysis
+* Define the technology model parameters
+.model nmos nmos 
+.model pmos pmos
+
+* Define parameter for PMOS width
+.param Wp=240n
+
+* Circuit elements
+Vdd vdd 0 DC 1V ; Power supply voltage
+Vin in 0 DC 0 ; Input voltage (DC source for DC sweep)
+
+* Transistor instances
+M1 out in vdd vdd pmos L=45n W='Wp' ; PMOS transistor (parametric width)
+M2 out in 0 0 nmos L=45n W=120n ; NMOS transistor
+
+* Load capacitance
+Cload out 0 1pF ; Load capacitor
+
+* DC Analysis with parametric sweep
+.dc Vin 0 1 0.01 sweep Wp 120n 480n 120n ; Sweep Vin from 0 to 1V, vary Wp from 120nm to 480nm
+
+* Transient analysis (optional - commented out for parametric analysis)
+*.tran 1n 100n ; Transient analysis for 100 ns
+
+.control
+    run ; Run the simulation
+    
+    * Plot separate graphs for each Wp value
+    set hcopydevtype=postscript
+    
+    * Plot for Wp = 120nm
+    plot V(out) vs V(in) dc1=1 xlabel 'Vin (V)' ylabel 'Vout (V)' title 'VTC for Wp=120nm'
+    
+    * Plot for Wp = 240nm
+    plot V(out) vs V(in) dc1=2 xlabel 'Vin (V)' ylabel 'Vout (V)' title 'VTC for Wp=240nm'
+    
+    * Plot for Wp = 360nm
+    plot V(out) vs V(in) dc1=3 xlabel 'Vin (V)' ylabel 'Vout (V)' title 'VTC for Wp=360nm'
+    
+    * Plot for Wp = 480nm
+    plot V(out) vs V(in) dc1=4 xlabel 'Vin (V)' ylabel 'Vout (V)' title 'VTC for Wp=480nm'
+.endc
+
+.end
