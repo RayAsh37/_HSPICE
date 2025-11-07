@@ -1,0 +1,110 @@
+* CMOS NAND Gate with Power Optimization Analysis
+* Define the technology model parameters
+*.model nmos_rvt nmos 
+*.model pmos_rvt pmos
+.include p05_cmos_models_tt_1.inc
+
+* Define parameters for transistor sizing
+.param Wp=1 ; PMOS width parameter
+.param Wn=1 ; NMOS width parameter
+
+* Circuit elements
+Vdd vdd 0 DC 1V ; Power supply voltage
+Vina ina 0 DC 0 ; Input A voltage
+Vinb inb 0 DC 1 ; Input B voltage
+
+* PMOS transistors (parallel - pull-up network)
+M1 out ina vdd vdd pfet nfin='Wp' ; PMOS transistor A (parametric width)
+M2 out inb vdd vdd pfet nfin='Wp' ; PMOS transistor B (parametric width)
+
+* NMOS transistors (series - pull-down network)
+M3 out ina n1 0 nfet nfin='Wn' ; NMOS transistor A (parametric width)
+M4 n1 inb 0 0 nfet nfin='Wn' ; NMOS transistor B (parametric width)
+
+* Load capacitance
+Cload out 0 1pF ; Load capacitor
+
+* ================================================================
+* POWER OPTIMIZATION ANALYSES
+* ================================================================
+
+* 1. Static Power Analysis - Leakage current measurement
+.dc Vina 0 1 1 Vinb 0 1 1 sweep Wp 1 5 1 ; All input combinations at corners
+
+* 2. Dynamic Power Analysis - Transient with activity
+.param trise=100p
+.param tper=2n
+.tran 10p 20n sweep Wp 1 5 1
+
+* Pulse inputs for switching activity
+.param pulse_en=0 ; Set to 1 for transient, 0 for DC
+Vina ina 0 DC 0 ; Default DC
+Vinb inb 0 DC 0 ; Default DC
+*Vina ina 0 PULSE(0 1 0 'trise' 'trise' 'tper/2' 'tper')
+*Vinb inb 0 PULSE(0 1 'tper/2' 'trise' 'trise' 'tper/2' 'tper')
+
+* 3. Power-Delay Product Analysis
+* Measure both delay and energy per transition
+.measure tran tphl_a TRIG V(ina) VAL=0.5 RISE=1 TARG V(out) VAL=0.5 FALL=1
+.measure tran tplh_a TRIG V(ina) VAL=0.5 FALL=1 TARG V(out) VAL=0.5 RISE=1
+.measure tran avg_delay PARAM='(tphl_a+tplh_a)/2'
+
+* 4. Energy per transition
+.measure tran energy_total INTEG P(Vdd) FROM=0n TO=20n
+.measure tran avg_power PARAM='energy_total/20n'
+
+* 5. Leakage current in different states
+.measure dc Ileak_00 FIND I(Vdd) AT=0 ; Both inputs LOW
+.measure dc Ileak_01 FIND I(Vdd) WHEN V(ina)=0 V(inb)=1
+.measure dc Ileak_10 FIND I(Vdd) WHEN V(ina)=1 V(inb)=0
+.measure dc Ileak_11 FIND I(Vdd) WHEN V(ina)=1 V(inb)=1
+
+* 6. Short circuit current analysis
+.measure tran Isc_peak MAX I(Vdd) FROM=0n TO=10n
+.measure tran Isc_avg AVG I(Vdd) FROM=0n TO=10n
+
+* ================================================================
+* CONTROL SECTION - Power Analysis Plots
+* ================================================================
+.control
+    * Run DC analysis for leakage
+    dc Vina 0 1 1 Vinb 0 1 1 sweep Wp 1 5 1
+    
+    * Plot leakage current vs sizing
+    plot I(Vdd) vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Leakage Current (A)' title 'Leakage vs Sizing'
+    
+    * Calculate static power for each configuration
+    let Pstatic = V(vdd) * I(Vdd)
+    plot Pstatic vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Static Power (W)' title 'Static Power vs Sizing'
+    
+    * Run transient for dynamic power
+    * Uncomment pulse sources above and run:
+    * tran 10p 20n sweep Wp 1 5 1
+    * plot V(out) V(ina) V(inb) xlabel 'Time (s)' ylabel 'Voltage (V)'
+    * let Pdynamic = V(vdd) * I(Vdd)
+    * plot Pdynamic xlabel 'Time (s)' ylabel 'Dynamic Power (W)'
+    
+    * VTC for noise margin analysis (affects power)
+    dc Vina 0 1 0.01 sweep Wp 1 5 1
+    plot V(out) vs V(ina) xlabel 'Vin (V)' ylabel 'Vout (V)' title 'VTC - Power vs Performance Trade-off'
+    
+    * Print power metrics
+    print Ileak_00 Ileak_01 Ileak_10 Ileak_11
+    print avg_power energy_total
+    
+    * Power-Delay Product calculation
+    * let PDP = avg_power * avg_delay
+    * print PDP
+    
+.endc
+
+* ================================================================
+* OPTIMIZATION GUIDELINES (see results):
+* 1. Minimize Wp/Wn for lower leakage (but watch delay)
+* 2. Balance rise/fall times to minimize short-circuit current
+* 3. Reduce Cload if possible to lower dynamic power
+* 4. Check VTC transition region width (sharp = less short-circuit)
+* 5. Power-Delay Product helps find optimal sizing
+* ================================================================
+
+.end

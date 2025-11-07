@@ -1,0 +1,201 @@
+* CMOS 2-Input OR Gate with Power Optimization Analysis
+* Implementation: NOR2 followed by Inverter
+* Define the technology model parameters
+*.model nmos_rvt nmos 
+*.model pmos_rvt pmos
+.include p05_cmos_models_tt_1.inc
+
+* Define parameters for transistor sizing
+.param Wp=1 ; PMOS width parameter for NOR2
+.param Wn=1 ; NMOS width parameter for NOR2
+.param Wp_inv=1 ; PMOS width for inverter
+.param Wn_inv=1 ; NMOS width for inverter
+
+* Circuit elements
+Vdd vdd 0 DC 1V ; Power supply voltage
+Vina ina 0 DC 0 ; Input A voltage
+Vinb inb 0 DC 0 ; Input B voltage
+
+* ================================================================
+* NOR2 STAGE
+* ================================================================
+* PMOS transistors (series - pull-up network)
+M1 nor_out ina n1 vdd pfet nfin='Wp' ; PMOS transistor A (top)
+M2 n1 inb vdd vdd pfet nfin='Wp' ; PMOS transistor B (bottom)
+
+* NMOS transistors (parallel - pull-down network)
+M3 nor_out ina 0 0 nfet nfin='Wn' ; NMOS transistor A
+M4 nor_out inb 0 0 nfet nfin='Wn' ; NMOS transistor B
+
+* Internal node capacitance
+Cint nor_out 0 0.5pF ; Internal node capacitor
+
+* ================================================================
+* INVERTER STAGE
+* ================================================================
+* PMOS transistor (pull-up)
+M5 out nor_out vdd vdd pfet nfin='Wp_inv' ; Inverter PMOS
+
+* NMOS transistor (pull-down)
+M6 out nor_out 0 0 nfet nfin='Wn_inv' ; Inverter NMOS
+
+* Load capacitance
+Cload out 0 1pF ; Output load capacitor
+
+* ================================================================
+* POWER OPTIMIZATION ANALYSES
+* ================================================================
+
+* 1. Static Power Analysis - Leakage current measurement
+* Sweep all 4 input combinations (00, 01, 10, 11)
+.dc Vina 0 1 1 Vinb 0 1 1 sweep Wp 1 5 1
+
+* 2. Dynamic Power Analysis - Transient with activity
+.param trise=100p
+.param tper=2n
+.tran 10p 20n sweep Wp 1 5 1
+
+* Pulse inputs for switching activity
+.param pulse_en=0 ; Set to 1 for transient, 0 for DC
+Vina ina 0 DC 0 ; Default DC
+Vinb inb 0 DC 0 ; Default DC
+*Vina ina 0 PULSE(0 1 0 'trise' 'trise' 'tper/2' 'tper')
+*Vinb inb 0 PULSE(0 1 'tper/2' 'trise' 'trise' 'tper/2' 'tper')
+
+* 3. Power-Delay Product Analysis
+* Measure propagation delays for both transitions
+.measure tran tphl_a TRIG V(ina) VAL=0.5 RISE=1 TARG V(out) VAL=0.5 RISE=1
+.measure tran tplh_a TRIG V(ina) VAL=0.5 FALL=1 TARG V(out) VAL=0.5 FALL=1
+.measure tran avg_delay PARAM='(tphl_a+tplh_a)/2'
+
+* 4. Energy per transition
+.measure tran energy_total INTEG P(Vdd) FROM=0n TO=20n
+.measure tran avg_power PARAM='energy_total/20n'
+
+* 5. Leakage current in different states
+.measure dc Ileak_00 FIND I(Vdd) WHEN V(ina)=0 V(inb)=0 ; Both LOW (output HIGH)
+.measure dc Ileak_01 FIND I(Vdd) WHEN V(ina)=0 V(inb)=1 ; Output HIGH
+.measure dc Ileak_10 FIND I(Vdd) WHEN V(ina)=1 V(inb)=0 ; Output HIGH
+.measure dc Ileak_11 FIND I(Vdd) WHEN V(ina)=1 V(inb)=1 ; Both HIGH (output HIGH)
+
+* 6. Short circuit current analysis
+.measure tran Isc_peak MAX I(Vdd) FROM=0n TO=10n
+.measure tran Isc_avg AVG I(Vdd) FROM=0n TO=10n
+
+* 7. Stage-specific power analysis
+.measure tran Inor_avg AVG I(M1:d)+I(M2:d) FROM=0n TO=20n
+.measure tran Iinv_avg AVG I(M5:d) FROM=0n TO=20n
+
+* 8. Series resistance analysis (for stacked PMOS)
+.measure dc Ron_pmos PARAM='1/gm(M1)' ; Approximate on-resistance
+
+* 9. NOR stage delay impact
+.measure tran tnor_delay TRIG V(ina) VAL=0.5 RISE=1 TARG V(nor_out) VAL=0.5 FALL=1
+.measure tran tinv_delay TRIG V(nor_out) VAL=0.5 FALL=1 TARG V(out) VAL=0.5 RISE=1
+
+* ================================================================
+* CONTROL SECTION - Power Analysis Plots
+* ================================================================
+.control
+    * Run DC analysis for leakage across all input combinations
+    dc Vina 0 1 1 Vinb 0 1 1 sweep Wp 1 5 1
+    
+    * Plot leakage current vs sizing
+    plot I(Vdd) vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Leakage Current (A)' title 'OR2 Leakage vs Sizing'
+    
+    * Calculate static power for each configuration
+    let Pstatic = V(vdd) * I(Vdd)
+    plot Pstatic vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Static Power (W)' title 'OR2 Static Power vs Sizing'
+    
+    * VTC for single input (other held low) - noise margin analysis
+    dc Vina 0 1 0.01 Vinb 0 0 1 sweep Wp 1 5 1
+    plot V(out) vs V(ina) xlabel 'Vin (V)' ylabel 'Vout (V)' title 'OR2 VTC - Power vs Performance'
+    
+    * Plot internal node voltage (NOR output)
+    plot V(nor_out) vs V(ina) xlabel 'Vin (V)' ylabel 'V_nor (V)' title 'NOR2 Stage Output'
+    
+    * Run transient for dynamic power (uncomment pulse sources above)
+    * tran 10p 20n sweep Wp 1 5 1
+    * plot V(out) V(ina) V(inb) xlabel 'Time (s)' ylabel 'Voltage (V)' title 'OR2 Transient Response'
+    * plot V(nor_out) xlabel 'Time (s)' ylabel 'Internal Node (V)' title 'NOR Stage Output'
+    * let Pdynamic = V(vdd) * I(Vdd)
+    * plot Pdynamic xlabel 'Time (s)' ylabel 'Dynamic Power (W)' title 'Instantaneous Power'
+    
+    * Current distribution between stages
+    * let I_nor2 = I(M1:d)+I(M2:d)
+    * let I_inv = I(M5:d)
+    * plot I_nor2 I_inv xlabel 'Time (s)' ylabel 'Stage Current (A)' title 'Stage-wise Current'
+    
+    * Delay comparison between stages
+    * print tnor_delay tinv_delay
+    
+    * Print power metrics
+    print Ileak_00 Ileak_01 Ileak_10 Ileak_11
+    print avg_power energy_total
+    
+    * Power-Delay Product calculation
+    * let PDP = avg_power * avg_delay
+    * print PDP avg_delay
+    
+    * Series resistance impact on pull-up
+    * print Ron_pmos
+    
+.endc
+
+* ================================================================
+* OPTIMIZATION GUIDELINES for 2-Input OR Gate:
+* 
+* CRITICAL: Series PMOS stack creates complementary issues to NAND:
+* 1. Higher series resistance in pull-up path → slower rise time
+* 2. Intermediate node (n1) between PMOS can cause delay
+* 3. Body effect on stacked PMOS increases |Vth|
+* 4. Parallel NMOS → stronger pull-down (asymmetric behavior)
+*
+* OPTIMIZATION STRATEGIES:
+* 1. Increase Wp (PMOS width) to compensate for series resistance
+*    - Typically use Wp = 1.5x to 2.5x of single PMOS
+*    - PMOS already weaker than NMOS (lower mobility)
+* 2. NMOS sizing (Wn) can be smaller since they're in parallel
+*    - Two parallel NMOS provide 2x drive strength
+*    - Can reduce Wn to save area and leakage power
+* 3. Balance rise/fall times:
+*    - Series PMOS → slow rise
+*    - Parallel NMOS → fast fall
+*    - Adjust Wp/Wn ratio for symmetric switching
+* 4. Leakage considerations:
+*    - State 00: Both PMOS on, but series → less leakage
+*    - State 11: Both NMOS on, parallel → more leakage
+*    - Worst leakage typically in 11 state
+* 5. Inverter stage sizing:
+*    - Size based on NOR stage drive capability
+*    - If NOR is weak (small Wp), inverter needs smaller input cap
+*    - Balance Wp_inv/Wn_inv for final output drive
+* 6. Internal node capacitance (Cint):
+*    - Affects NOR stage switching and power
+*    - Higher Cint → more dynamic power in NOR stage
+* 7. For minimum power:
+*    - Reduce Wn (parallel NMOS leak more in 11 state)
+*    - Moderate Wp (enough to maintain speed)
+*    - Trade-off: Asymmetric rise/fall times
+* 8. For minimum delay:
+*    - Significantly increase Wp (2-3x baseline)
+*    - Keep Wn moderate (already strong in parallel)
+*    - Trade-off: Higher static and dynamic power
+* 9. Optimal PDP:
+*    - Usually at Wp=2-4, Wn=1-2
+*    - More aggressive PMOS sizing than NAND gate
+*
+* COMPARISON WITH NAND2:
+* - NAND2: Series NMOS (pull-down weak), Parallel PMOS (pull-up strong)
+* - NOR2: Series PMOS (pull-up weak), Parallel NMOS (pull-down strong)
+* - OR2 typically needs larger PMOS than NAND2 needs NMOS
+*   (due to inherent PMOS weakness: μp ≈ 0.3-0.4 × μn)
+*
+* MEASUREMENT FOCUS:
+* - Rise time typically longer than fall time
+* - Leakage highest in state 11 (both inputs high)
+* - Series PMOS resistance dominates pull-up delay
+* - Intermediate node (n1) voltage swing affects power
+* ================================================================
+
+.end

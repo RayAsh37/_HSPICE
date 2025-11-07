@@ -1,0 +1,355 @@
+* CMOS Inverter with Power Optimization Analysis
+* Define the technology model parameters
+*.model nmos_rvt nmos 
+*.model pmos_rvt pmos
+.include p05_cmos_models_tt_1.inc
+
+* Define parameters for transistor sizing
+.param Wp=1 ; PMOS width parameter
+.param Wn=1 ; NMOS width parameter (added for independent sizing)
+
+* Circuit elements
+Vdd vdd 0 DC 1V ; Power supply voltage
+Vin in 0 DC 0 ; Input voltage (DC source for DC sweep)
+
+* Transistor instances
+M1 out in vdd vdd pfet nfin='Wp' ; PMOS transistor (parametric width)
+M2 out in 0 0 nfet nfin='Wn' ; NMOS transistor (parametric width)
+
+* Load capacitance
+Cload out 0 1pF ; Load capacitor
+
+* ================================================================
+* POWER OPTIMIZATION ANALYSES
+* ================================================================
+
+* 1. DC Analysis with parametric sweep for VTC
+.dc Vin 0 1 0.01 sweep Wp 1 5 1 ; Sweep Vin, vary Wp
+
+* 2. Transient analysis for dynamic power
+.param trise=100p
+.param tper=2n
+.tran 10p 20n sweep Wp 1 5 1
+
+* Pulse input for switching activity
+.param pulse_en=0 ; Set to 1 for transient, 0 for DC
+Vin in 0 DC 0 ; Default DC
+*Vin in 0 PULSE(0 1 0 'trise' 'trise' 'tper/2' 'tper')
+
+* 3. Power-Delay Product Analysis
+* Measure propagation delays
+.measure tran tphl TRIG V(in) VAL=0.5 RISE=1 TARG V(out) VAL=0.5 FALL=1
+.measure tran tplh TRIG V(in) VAL=0.5 FALL=1 TARG V(out) VAL=0.5 RISE=1
+.measure tran avg_delay PARAM='(tphl+tplh)/2'
+
+* 4. Rise and Fall time measurements
+.measure tran trise TRIG V(out) VAL=0.1 RISE=1 TARG V(out) VAL=0.9 RISE=1
+.measure tran tfall TRIG V(out) VAL=0.9 FALL=1 TARG V(out) VAL=0.1 FALL=1
+.measure tran rise_fall_ratio PARAM='trise/tfall'
+
+* 5. Energy per transition
+.measure tran energy_total INTEG P(Vdd) FROM=0n TO=20n
+.measure tran avg_power PARAM='energy_total/20n'
+.measure tran energy_per_transition PARAM='energy_total/(20n/tper)'
+
+* 6. Leakage current in different states
+.measure dc Ileak_low FIND I(Vdd) WHEN V(in)=0 ; Input LOW, output HIGH
+.measure dc Ileak_high FIND I(Vdd) WHEN V(in)=1 ; Input HIGH, output LOW
+
+* 7. Short circuit current analysis
+.measure tran Isc_peak MAX I(Vdd) FROM=0n TO=10n
+.measure tran Isc_avg AVG I(Vdd) FROM=0n TO=10n
+.measure tran Isc_energy INTEG I(Vdd)*V(vdd) FROM=1n TO=2n ; Energy during one transition
+
+* 8. Dynamic power components
+.measure tran Idynamic_avg AVG I(Vdd) FROM=0n TO=20n
+.measure tran Pdynamic_avg PARAM='Idynamic_avg*1'
+
+* 9. Switching point and noise margins
+.measure dc Vm WHEN V(out)=V(in) ; Switching threshold voltage
+.measure dc Vil WHEN V(out)=0.9 CROSS=1 ; Input low voltage
+.measure dc Vih WHEN V(out)=0.1 CROSS=1 ; Input high voltage
+.measure dc NMl PARAM='Vm-Vil' ; Low noise margin
+.measure dc NMh PARAM='Vih-Vm' ; High noise margin
+
+* 10. Gain at switching point
+.measure dc gain_max MAX deriv('V(out)')
+
+* 11. Beta ratio analysis (PMOS to NMOS strength)
+.measure dc beta_ratio PARAM='Wp/Wn'
+
+* 12. Output impedance
+.measure dc Rout_high PARAM='1/gm(M1)' ; Output resistance when pulling high
+.measure dc Rout_low PARAM='1/gm(M2)' ; Output resistance when pulling low
+
+* 13. Capacitance components
+.measure tran Cload_eff PARAM='1e-12' ; Load capacitance
+.measure dc Cin PARAM='Cgs(M1)+Cgs(M2)' ; Input capacitance
+
+* ================================================================
+* CONTROL SECTION - Power Analysis Plots
+* ================================================================
+.control
+    * Run DC analysis for VTC and leakage
+    dc Vin 0 1 0.01 sweep Wp 1 5 1
+    
+    * Plot Voltage Transfer Characteristic
+    plot V(out) vs V(in) xlabel 'Vin (V)' ylabel 'Vout (V)' title 'Inverter VTC for different Wp values'
+    
+    * Plot DC current (leakage + transition region current)
+    plot I(Vdd) vs V(in) xlabel 'Vin (V)' ylabel 'Idd (A)' title 'Supply Current vs Input Voltage'
+    
+    * Plot instantaneous power during transition
+    let Pdc = V(vdd) * I(Vdd)
+    plot Pdc vs V(in) xlabel 'Vin (V)' ylabel 'Power (W)' title 'DC Power vs Input (shows short-circuit)'
+    
+    * Plot gain curve
+    let gain = deriv('V(out)')
+    plot gain vs V(in) xlabel 'Vin (V)' ylabel 'Gain (dV/dV)' title 'Small Signal Gain'
+    
+    * Calculate and plot static power for both states
+    let Pstatic_low = V(vdd) * I(Vdd)
+    plot Pstatic_low vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Static Power (W)' title 'Static Power vs Sizing'
+    
+    * Run transient analysis (uncomment pulse input above)
+    * tran 10p 20n sweep Wp 1 5 1
+    * plot V(out) V(in) xlabel 'Time (s)' ylabel 'Voltage (V)' title 'Transient Response'
+    * let Ptran = V(vdd) * I(Vdd)
+    * plot Ptran xlabel 'Time (s)' ylabel 'Power (W)' title 'Instantaneous Power'
+    
+    * Plot current components during switching
+    * plot I(Vdd) xlabel 'Time (s)' ylabel 'Idd (A)' title 'Supply Current (Dynamic + Short-circuit)'
+    * plot I(M1:d) I(M2:d) xlabel 'Time (s)' ylabel 'Transistor Currents (A)' title 'PMOS vs NMOS Current'
+    
+    * Energy analysis
+    * let energy = integ(V(vdd)*I(Vdd))
+    * plot energy xlabel 'Time (s)' ylabel 'Cumulative Energy (J)' title 'Energy Consumption Over Time'
+    
+    * Print key metrics
+    print Ileak_low Ileak_high
+    print Vm Vil Vih NMl NMh
+    print gain_max
+    print beta_ratio
+    
+    * Print timing and power metrics (after transient)
+    * print tphl tplh avg_delay
+    * print trise tfall rise_fall_ratio
+    * print avg_power energy_total energy_per_transition
+    * print Isc_peak Isc_avg Isc_energy
+    
+    * Calculate Power-Delay Product
+    * let PDP = avg_power * avg_delay
+    * print PDP
+    
+    * Calculate Energy-Delay Product
+    * let EDP = energy_per_transition * avg_delay
+    * print EDP
+    
+.endc
+
+* ================================================================
+* OPTIMIZATION GUIDELINES for CMOS Inverter:
+* 
+* FUNDAMENTAL INVERTER CHARACTERISTICS:
+* 1. Simplest CMOS logic gate (2 transistors)
+* 2. Building block for all complex gates
+* 3. Power analysis here applies to all CMOS gates
+* 
+* POWER COMPONENTS IN CMOS INVERTER:
+* 
+* A) **STATIC POWER (Leakage)**:
+*    P_static = V_dd × I_leak
+*    - Subthreshold leakage: Dominant in modern tech
+*    - Gate leakage: Through gate oxide (thin oxide issue)
+*    - Junction leakage: PN junction reverse bias current
+*    
+*    Leakage States:
+*    - Input LOW: PMOS ON, NMOS OFF → I_leak through NMOS
+*    - Input HIGH: PMOS OFF, NMOS ON → I_leak through PMOS
+*    - Typically, NMOS leakage > PMOS leakage
+*    
+*    Optimization:
+*    - Minimize transistor widths (reduce W → reduce I_leak)
+*    - Use high-Vth transistors if speed allows
+*    - Stack transistors (increases effective Vth)
+*    - Trade-off: Smaller W → slower, higher Ron
+* 
+* B) **DYNAMIC POWER (Switching)**:
+*    P_dynamic = α × C_load × V_dd² × f
+*    where α = activity factor (0 to 1)
+*    
+*    Components:
+*    - Charging/discharging load capacitance
+*    - C_load includes: external load + wire cap + fan-out
+*    - Energy per transition: E = C_load × V_dd²
+*    - Half energy from supply, half dissipated in transistor
+*    
+*    Optimization:
+*    - Reduce C_load (smaller transistors, layout optimization)
+*    - Lower V_dd (quadratic benefit, but affects speed)
+*    - Reduce switching frequency
+*    - Minimize activity factor (circuit/logic level)
+*    - Trade-off: Smaller C → weaker drive → slower
+* 
+* C) **SHORT-CIRCUIT POWER**:
+*    P_sc = I_sc × V_dd
+*    - Occurs when both PMOS and NMOS conduct simultaneously
+*    - Happens during input transition (V_in between Vth_n and |Vth_p|)
+*    - Peak current during transition region (V_in ≈ V_dd/2)
+*    
+*    Factors affecting I_sc:
+*    - Input rise/fall time (slower → more I_sc)
+*    - Transistor sizing (larger → more I_sc peak)
+*    - V_dd (higher → more I_sc)
+*    - Threshold voltages (closer Vth → wider overlap)
+*    
+*    Optimization:
+*    - Fast input transitions (minimize overlap time)
+*    - Balance PMOS/NMOS sizing (symmetric switching)
+*    - Sharp VTC (high gain at switching point)
+*    - Typically 10-15% of total power (well-designed)
+*    - Trade-off: Can't eliminate completely
+* 
+* SIZING OPTIMIZATION STRATEGIES:
+* 
+* 1. **BETA RATIO (Wp/Wn)**:
+*    - Determines switching point (Vm) and symmetry
+*    - For symmetric inverter: Vm = V_dd/2
+*    - Required: β_p = β_n → (W/L)_p × μ_p = (W/L)_n × μ_n
+*    - Since μ_n ≈ 2.5-3× μ_p → need W_p ≈ 2.5-3× W_n
+*    
+*    Effects of beta ratio:
+*    - Wp/Wn = 1: Vm < V_dd/2, asymmetric switching
+*    - Wp/Wn = 2.5: Vm ≈ V_dd/2, symmetric (typical target)
+*    - Wp/Wn = 4-5: Vm > V_dd/2, slow fall time
+*    
+*    Power implications:
+*    - Larger Wp: More PMOS leakage, larger area
+*    - Symmetric design: Balanced rise/fall, less skew
+*    - Asymmetric OK if: Only one edge is critical
+* 
+* 2. **MINIMUM POWER SIZING**:
+*    - Use minimum allowable widths (Wp=1, Wn=1)
+*    - Minimizes leakage (∝ W)
+*    - Minimizes dynamic power (C ∝ W)
+*    - Trade-offs:
+*      • Slow propagation delay
+*      • High output impedance
+*      • Poor noise margins
+*      • Sensitive to process variation
+*    - Use when: Speed non-critical, low activity
+* 
+* 3. **MINIMUM DELAY SIZING**:
+*    - Increase widths to reduce Ron and improve drive
+*    - Typical: Wp=3-5, Wn=1.5-2 (maintaining ratio)
+*    - Trade-offs:
+*      • Higher leakage power (∝ W)
+*      • Higher dynamic power (C ∝ W)
+*      • Larger area
+*      • Better noise immunity
+*    - Use when: Speed critical, power budget allows
+* 
+* 4. **OPTIMAL PDP (Power-Delay Product)**:
+*    - Minimize PDP = Power × Delay
+*    - Usually at moderate sizing: Wp=2-3, Wn=1
+*    - Best energy efficiency per operation
+*    - Sweet spot for most applications
+*    - Balances speed and power
+* 
+* 5. **OPTIMAL EDP (Energy-Delay Product)**:
+*    - Minimize EDP = Energy × Delay
+*    - Emphasizes energy over power
+*    - Often requires larger sizes than PDP optimum
+*    - Use for: Energy-constrained systems
+* 
+* NOISE MARGIN CONSIDERATIONS:
+* - NM_L = V_IL - V_OL (low state noise margin)
+* - NM_H = V_OH - V_IH (high state noise margin)
+* - Target: NM ≥ 0.3-0.4 × V_dd
+* - Larger transistors → better noise margins
+* - Higher gain at switching point → better NM
+* 
+* LOAD CAPACITANCE IMPACT:
+* - Delay ∝ C_load × Ron
+* - Dynamic power ∝ C_load
+* - For large loads: Must size up transistors
+* - Rule of thumb: Size for fanout of 4 (FO4 delay)
+* - Each 1× load → increase W by ~1.4× for constant delay
+* 
+* MULTI-OBJECTIVE OPTIMIZATION:
+* 
+* Objective: Minimize f(P_avg, Delay, Area, Noise Margin)
+* 
+* Case 1: Low Power, Low Performance
+* - Wp=1, Wn=1
+* - P_static: Minimum
+* - P_dynamic: Minimum (small C)
+* - Delay: Maximum (slow)
+* - Use: Standby circuits, low activity nodes
+* 
+* Case 2: Balanced (Most Common)
+* - Wp=2-2.5, Wn=1
+* - P_static: Low-Moderate
+* - P_dynamic: Moderate
+* - Delay: Moderate
+* - Use: Standard library cells, general logic
+* 
+* Case 3: High Performance
+* - Wp=4-6, Wn=2-3
+* - P_static: High
+* - P_dynamic: High
+* - Delay: Low
+* - Use: Critical paths, clock buffers
+* 
+* VOLTAGE SCALING IMPACT:
+* - Lowering V_dd:
+*   • P_dynamic ∝ V_dd² (quadratic benefit!)
+*   • P_static ∝ V_dd (linear benefit)
+*   • Delay increases (sublinear)
+*   • Noise margin decreases
+* - Dynamic Voltage Scaling (DVS): Adjust V_dd based on workload
+* - Near-threshold computing: V_dd ≈ V_th for ultra-low power
+* 
+* MEASUREMENT PRIORITIES:
+* 1. Switching point (Vm) - should be near V_dd/2
+* 2. Leakage in both states - compare LOW vs HIGH input
+* 3. Rise/fall times - should be similar (< 2:1 ratio)
+* 4. Short-circuit current peak - minimize overlap
+* 5. Energy per transition - key metric for battery life
+* 6. Propagation delay - both tplh and tphl
+* 7. Noise margins - ensure robust operation
+* 8. Gain at switching point - higher is better
+* 
+* TEMPERATURE EFFECTS:
+* - Leakage increases exponentially with temperature
+* - Mobility decreases with temperature (slower)
+* - Threshold voltage decreases with temperature
+* - Design must work across temperature range
+* 
+* PROCESS VARIATION:
+* - Transistor parameters vary (W, L, Vth, tox)
+* - Fast corner: Low Vth, fast → low power, fast
+* - Slow corner: High Vth, slow → high power, slow
+* - Must verify power across all corners
+* 
+* RECOMMENDED ANALYSIS FLOW:
+* 1. DC sweep: Get VTC, find Vm, measure leakage
+* 2. Transient: Measure delays, rise/fall times
+* 3. Power: Calculate static, dynamic, short-circuit
+* 4. Sweep Wp/Wn: Find optimal beta ratio
+* 5. Sweep both: Find PDP/EDP optimum
+* 6. Corner analysis: Verify across PVT
+* 7. Compare with targets: Iterate sizing
+* 
+* PRACTICAL DESIGN RULES:
+* - Start with Wp = 2.5×Wn for symmetry
+* - For minimum power: Reduce proportionally
+* - For speed: Increase proportionally
+* - Check leakage in both input states
+* - Verify short-circuit current < 15% total
+* - Ensure rise/fall ratio between 0.5-2.0
+* - Target noise margins > 30% V_dd
+* - Validate across temperature (-40°C to 125°C)
+* ================================================================
+
+.end

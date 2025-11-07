@@ -1,0 +1,249 @@
+* CMOS 4-Input NOR Gate with Power Optimization Analysis
+* Direct implementation: 4 PMOS in series, 4 NMOS in parallel
+* Define the technology model parameters
+*.model nmos_rvt nmos 
+*.model pmos_rvt pmos
+.include p05_cmos_models_tt_1.inc
+
+* Define parameters for transistor sizing
+.param Wp=1 ; PMOS width parameter (critical for 4-stack)
+.param Wn=1 ; NMOS width parameter (parallel configuration)
+
+* Circuit elements
+Vdd vdd 0 DC 1V ; Power supply voltage
+Vina ina 0 DC 0 ; Input A voltage
+Vinb inb 0 DC 0 ; Input B voltage
+Vinc inc 0 DC 0 ; Input C voltage
+Vind ind 0 DC 0 ; Input D voltage
+
+* ================================================================
+* NOR4 GATE - Direct Implementation
+* ================================================================
+* PMOS transistors (series - pull-up network)
+* 4-stack PMOS: Creates severe performance challenges
+M1 out ina n1 vdd pfet nfin='Wp' ; PMOS transistor A (top)
+M2 n1 inb n2 vdd pfet nfin='Wp' ; PMOS transistor B
+M3 n2 inc n3 vdd pfet nfin='Wp' ; PMOS transistor C
+M4 n3 ind vdd vdd pfet nfin='Wp' ; PMOS transistor D (bottom)
+
+* NMOS transistors (parallel - pull-down network)
+* 4 parallel paths: Very strong pull-down
+M5 out ina 0 0 nfet nfin='Wn' ; NMOS transistor A
+M6 out inb 0 0 nfet nfin='Wn' ; NMOS transistor B
+M7 out inc 0 0 nfet nfin='Wn' ; NMOS transistor C
+M8 out ind 0 0 nfet nfin='Wn' ; NMOS transistor D
+
+* Load capacitance
+Cload out 0 1pF ; Output load capacitor
+
+* ================================================================
+* POWER OPTIMIZATION ANALYSES
+* ================================================================
+
+* 1. Static Power Analysis - Leakage current measurement
+* Sample key states from 16 possible combinations
+.dc Vina 0 1 1 Vinb 0 1 1 Vinc 0 1 1 Vind 0 1 1 sweep Wp 1 5 1
+
+* 2. Dynamic Power Analysis - Transient with activity
+.param trise=100p
+.param tper=8n
+.tran 10p 80n sweep Wp 1 5 1
+
+* Pulse inputs for switching activity (staggered for different patterns)
+.param pulse_en=0 ; Set to 1 for transient, 0 for DC
+Vina ina 0 DC 0 ; Default DC
+Vinb inb 0 DC 0 ; Default DC
+Vinc inc 0 DC 0 ; Default DC
+Vind ind 0 DC 0 ; Default DC
+*Vina ina 0 PULSE(0 1 0 'trise' 'trise' 'tper/2' 'tper')
+*Vinb inb 0 PULSE(0 1 'tper/4' 'trise' 'trise' 'tper' '2*tper')
+*Vinc inc 0 PULSE(0 1 'tper/2' 'trise' 'trise' '2*tper' '4*tper')
+*Vind ind 0 PULSE(0 1 '3*tper/4' 'trise' 'trise' '4*tper' '8*tper')
+
+* 3. Power-Delay Product Analysis
+* Measure propagation delays
+.measure tran tphl_a TRIG V(ina) VAL=0.5 FALL=1 TARG V(out) VAL=0.5 RISE=1
+.measure tran tplh_a TRIG V(ina) VAL=0.5 RISE=1 TARG V(out) VAL=0.5 FALL=1
+.measure tran avg_delay PARAM='(tphl_a+tplh_a)/2'
+
+* 4. Energy per transition
+.measure tran energy_total INTEG P(Vdd) FROM=0n TO=80n
+.measure tran avg_power PARAM='energy_total/80n'
+
+* 5. Leakage current in critical states
+.measure dc Ileak_0000 FIND I(Vdd) WHEN V(ina)=0 V(inb)=0 V(inc)=0 V(ind)=0 ; All LOW (output HIGH)
+.measure dc Ileak_0001 FIND I(Vdd) WHEN V(ina)=0 V(inb)=0 V(inc)=0 V(ind)=1 ; One HIGH
+.measure dc Ileak_1111 FIND I(Vdd) WHEN V(ina)=1 V(inb)=1 V(inc)=1 V(ind)=1 ; All HIGH (output LOW)
+.measure dc Ileak_1000 FIND I(Vdd) WHEN V(ina)=1 V(inb)=0 V(inc)=0 V(ind)=0 ; One HIGH (output LOW)
+
+* 6. Short circuit current analysis
+.measure tran Isc_peak MAX I(Vdd) FROM=0n TO=40n
+.measure tran Isc_avg AVG I(Vdd) FROM=0n TO=40n
+
+* 7. Rise vs Fall time comparison (critical for 4-stack PMOS)
+.measure tran trise TRIG V(out) VAL=0.1 RISE=1 TARG V(out) VAL=0.9 RISE=1
+.measure tran tfall TRIG V(out) VAL=0.9 FALL=1 TARG V(out) VAL=0.1 FALL=1
+.measure tran rise_fall_ratio PARAM='trise/tfall'
+
+* 8. Series resistance analysis (4-stack PMOS - severe issue)
+.measure dc Ron_pmos_stack PARAM='4/gm(M1)' ; Approximate total series resistance
+
+* 9. Intermediate node voltages (body effect indicator)
+.measure dc Vn1_0000 FIND V(n1) WHEN V(ina)=0 V(inb)=0 V(inc)=0 V(ind)=0
+.measure dc Vn2_0000 FIND V(n2) WHEN V(ina)=0 V(inb)=0 V(inc)=0 V(ind)=0
+.measure dc Vn3_0000 FIND V(n3) WHEN V(ina)=0 V(inb)=0 V(inc)=0 V(ind)=0
+
+* 10. Parallel NMOS effective width
+.measure dc Imax_pulldown MAX I(M5:d)+I(M6:d)+I(M7:d)+I(M8:d)
+
+* ================================================================
+* CONTROL SECTION - Power Analysis Plots
+* ================================================================
+.control
+    * Run DC analysis for leakage across input combinations
+    dc Vina 0 1 1 Vinb 0 1 1 Vinc 0 1 1 Vind 0 1 1 sweep Wp 1 5 1
+    
+    * Plot leakage current vs sizing
+    plot I(Vdd) vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Leakage Current (A)' title 'NOR4 Leakage vs Sizing'
+    
+    * Calculate static power for each configuration
+    let Pstatic = V(vdd) * I(Vdd)
+    plot Pstatic vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Static Power (W)' title 'NOR4 Static Power vs Sizing'
+    
+    * VTC for single input (others held low)
+    dc Vina 0 1 0.01 Vinb 0 0 1 Vinc 0 0 1 Vind 0 0 1 sweep Wp 1 5 1
+    plot V(out) vs V(ina) xlabel 'Vin (V)' ylabel 'Vout (V)' title 'NOR4 VTC - Extreme Asymmetry'
+    
+    * Plot intermediate node voltages (shows body effect)
+    plot V(n1) V(n2) V(n3) vs V(ina) xlabel 'Vin (V)' ylabel 'Internal Nodes (V)' title 'PMOS Stack Node Voltages'
+    
+    * Run transient for dynamic power (uncomment pulse sources above)
+    * tran 10p 80n sweep Wp 1 5 1
+    * plot V(out) V(ina) V(inb) V(inc) V(ind) xlabel 'Time (s)' ylabel 'Voltage (V)' title 'NOR4 Response'
+    * plot V(n1) V(n2) V(n3) xlabel 'Time (s)' ylabel 'Internal Nodes (V)' title 'PMOS Stack Dynamics'
+    * let Pdynamic = V(vdd) * I(Vdd)
+    * plot Pdynamic xlabel 'Time (s)' ylabel 'Dynamic Power (W)' title 'Instantaneous Power'
+    
+    * Rise vs fall time comparison
+    * print trise tfall rise_fall_ratio
+    
+    * Print power metrics
+    print Ileak_0000 Ileak_0001 Ileak_1111 Ileak_1000
+    print avg_power energy_total
+    
+    * Power-Delay Product calculation
+    * let PDP = avg_power * avg_delay
+    * print PDP avg_delay
+    
+    * Series resistance impact
+    * print Ron_pmos_stack
+    
+    * Intermediate node voltages
+    * print Vn1_0000 Vn2_0000 Vn3_0000
+    
+.endc
+
+* ================================================================
+* OPTIMIZATION GUIDELINES for 4-Input NOR Gate:
+* 
+* CRITICAL WARNING: 4-Stack PMOS is EXTREMELY PROBLEMATIC!
+* 
+* FUNDAMENTAL ISSUES:
+* 1. **Severe Series Resistance**: 4× the resistance of single PMOS
+*    - Each PMOS adds Ron ≈ 1/gm
+*    - Total resistance = 4 × Ron_single
+*    - Pull-up can be 10-100× slower than pull-down
+* 
+* 2. **Body Effect Amplification**: 
+*    - Bottom PMOS (M4): VSB = 0 (source at VDD)
+*    - M3: VSB > 0 (source below VDD)
+*    - M2: VSB even larger
+*    - M1: Maximum VSB
+*    - Each transistor has progressively higher |Vth|
+*    - Can increase |Vth| by 20-40% from bottom to top
+* 
+* 3. **Intermediate Node Capacitance**:
+*    - 3 internal nodes (n1, n2, n3)
+*    - Each has parasitic capacitance
+*    - Slows down switching even further
+* 
+* 4. **Extreme Asymmetry**:
+*    - 4 parallel NMOS: 4× drive strength (very strong)
+*    - 4 series PMOS: ~1/8 to 1/16 drive strength (very weak)
+*    - Rise time can be 50-100× longer than fall time!
+* 
+* 5. **Leakage Patterns**:
+*    - State 0000: All PMOS on (series) → moderate leakage
+*    - State 1111: All NMOS on (parallel) → HIGH leakage (4× paths)
+*    - Any single high input activates one NMOS → output LOW
+* 
+* AGGRESSIVE SIZING REQUIRED:
+* 1. **PMOS Width (Wp)**: Must be MUCH larger
+*    - Minimum: Wp = 3-4× baseline
+*    - Typical: Wp = 4-6× baseline
+*    - For balanced performance: Wp = 8-10× baseline
+*    - This is 2-3× more than NOR2 or OR2 requirements
+* 
+* 2. **NMOS Width (Wn)**: Can be reduced significantly
+*    - 4 parallel NMOS already very strong
+*    - Can use Wn = 0.5-0.75× baseline
+*    - Reduces leakage in 1111 state (most common)
+*    - Saves significant area and power
+* 
+* 3. **Alternative: Compound Gate Design**
+*    - Consider using two NOR2 gates + NAND2
+*    - NOR4 = NAND(NOR2(A,B), NOR2(C,D))
+*    - Only 2-stack instead of 4-stack
+*    - More area but MUCH better performance
+*    - Usually better power-delay product
+* 
+* POWER OPTIMIZATION STRATEGIES:
+* 1. **For Minimum Static Power**:
+*    - Reduce Wn aggressively (parallel NMOS dominate leakage)
+*    - Use minimum viable Wp (but expect very slow rise)
+*    - Trade-off: Unacceptable delay in most applications
+* 
+* 2. **For Balanced Performance**:
+*    - Large Wp (6-10×) to compensate for stack
+*    - Moderate Wn (0.5-0.75×) to reduce leakage
+*    - Acceptable rise time but higher static power
+* 
+* 3. **For Speed-Critical Applications**:
+*    - Massive Wp (10-15×) for reasonable rise time
+*    - Small Wn (0.5×) since pull-down is already strong
+*    - High power consumption
+*    - Consider compound gate instead!
+* 
+* 4. **Dynamic Power Considerations**:
+*    - Large PMOS → high capacitance → high CV²f power
+*    - Output transitions dominated by rise time
+*    - Short-circuit current HIGH during slow rise
+*    - Dynamic power can exceed static power
+* 
+* MEASUREMENT PRIORITIES:
+* 1. Rise/Fall time ratio (expect 20:1 to 100:1)
+* 2. Intermediate node voltages (show body effect)
+* 3. Leakage in state 1111 (worst case)
+* 4. Pull-up vs pull-down current capability
+* 5. Power-delay product vs compound gate
+* 
+* RECOMMENDED APPROACH:
+* - For NOR4: Use compound structure (two-level logic)
+* - Direct 4-stack PMOS should be AVOIDED in practice
+* - If must use direct: Wp ≥ 6-8×, Wn ≤ 0.5-0.75×
+* - Always compare PDP with compound alternatives
+* 
+* COMPARISON WITH OTHER GATES:
+* - NAND4: Also problematic (4-stack NMOS) but less severe
+*   (NMOS has higher mobility, less body effect)
+* - NOR4: Worst case for stacking (PMOS is inherently weak)
+* - Industry practice: Avoid gates with >3 series transistors
+* 
+* BODY EFFECT DETAILS:
+* - ΔVth = γ(√(2φf + VSB) - √(2φf))
+* - For 4-stack, top PMOS can have VSB ≈ 0.3-0.5V
+* - This increases |Vth| significantly
+* - Makes already-slow stack even slower
+* ================================================================
+
+.end

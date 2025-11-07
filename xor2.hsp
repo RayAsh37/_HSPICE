@@ -1,0 +1,334 @@
+* CMOS 2-Input XOR Gate with Power Optimization Analysis
+* Implementation: Transmission Gate Based XOR (Most Efficient)
+* Alternative implementations available in comments
+* Define the technology model parameters
+*.model nmos_rvt nmos 
+*.model pmos_rvt pmos
+.include p05_cmos_models_tt_1.inc
+
+* Define parameters for transistor sizing
+.param Wp=1 ; PMOS width parameter
+.param Wn=1 ; NMOS width parameter
+.param Wp_tg=1 ; PMOS width for transmission gates
+.param Wn_tg=1 ; NMOS width for transmission gates
+
+* Circuit elements
+Vdd vdd 0 DC 1V ; Power supply voltage
+Vina ina 0 DC 0 ; Input A voltage
+Vinb inb 0 DC 0 ; Input B voltage
+
+* ================================================================
+* TRANSMISSION GATE XOR IMPLEMENTATION
+* This is the most efficient CMOS XOR (12 transistors)
+* XOR = A'B + AB' = (A + B)(A' + B')
+* ================================================================
+
+* Generate complementary signals
+* Inverter for A
+M1 ina_bar ina vdd vdd pfet nfin='Wp'
+M2 ina_bar ina 0 0 nfet nfin='Wn'
+
+* Inverter for B
+M3 inb_bar inb vdd vdd pfet nfin='Wp'
+M4 inb_bar inb 0 0 nfet nfin='Wn'
+
+* Transmission Gate 1: Passes B when A=0 (A'B term)
+M5 out inb n_tg1 0 nfet nfin='Wn_tg' ; TG1 NMOS (controlled by A)
+M6 out inb n_tg1 vdd pfet nfin='Wp_tg' ; TG1 PMOS (controlled by A')
+* Connect control signals
+Rdum1 ina M5:g 0.01 ; A controls NMOS gate
+Rdum2 ina_bar M6:g 0.01 ; A' controls PMOS gate
+
+* Transmission Gate 2: Passes B' when A=1 (AB' term)
+M7 out inb_bar n_tg2 0 nfet nfin='Wn_tg' ; TG2 NMOS (controlled by A')
+M8 out inb_bar n_tg2 vdd pfet nfin='Wp_tg' ; TG2 PMOS (controlled by A)
+* Connect control signals
+Rdum3 ina_bar M7:g 0.01 ; A' controls NMOS gate
+Rdum4 ina M8:g 0.01 ; A controls PMOS gate
+
+* Output buffer/inverter
+M9 out_buf out vdd vdd pfet nfin='Wp'
+M10 out_buf out 0 0 nfet nfin='Wn'
+
+* Load capacitance
+Cload out_buf 0 1pF ; Output load capacitor
+
+* Internal node capacitances
+Cint1 ina_bar 0 0.2pF
+Cint2 inb_bar 0 0.2pF
+Cint3 out 0 0.3pF
+
+* ================================================================
+* ALTERNATIVE IMPLEMENTATIONS (COMMENTED OUT)
+* ================================================================
+
+* METHOD 2: NAND-based XOR (Uses 4 NANDs, 14-16 transistors)
+* XOR = (A NAND (A NAND B)) NAND (B NAND (A NAND B))
+* More robust but higher transistor count
+
+* METHOD 3: AOI/OAI Implementation (10-12 transistors)
+* XOR = (A + B)(A' + B') or A'B + AB'
+* Complex gate implementation
+
+* ================================================================
+* POWER OPTIMIZATION ANALYSES
+* ================================================================
+
+* 1. Static Power Analysis - Leakage current measurement
+* All 4 input combinations
+.dc Vina 0 1 1 Vinb 0 1 1 sweep Wp 1 5 1
+
+* 2. Dynamic Power Analysis - Transient with activity
+.param trise=100p
+.param tper=2n
+.tran 10p 20n sweep Wp 1 5 1
+
+* Pulse inputs for switching activity
+.param pulse_en=0 ; Set to 1 for transient, 0 for DC
+Vina ina 0 DC 0 ; Default DC
+Vinb inb 0 DC 0 ; Default DC
+*Vina ina 0 PULSE(0 1 0 'trise' 'trise' 'tper/2' 'tper')
+*Vinb inb 0 PULSE(0 1 'tper/2' 'trise' 'trise' 'tper/2' 'tper')
+
+* 3. Power-Delay Product Analysis
+.measure tran tphl_a TRIG V(ina) VAL=0.5 RISE=1 TARG V(out_buf) VAL=0.5 FALL=1
+.measure tran tplh_a TRIG V(ina) VAL=0.5 FALL=1 TARG V(out_buf) VAL=0.5 RISE=1
+.measure tran tphl_b TRIG V(inb) VAL=0.5 RISE=1 TARG V(out_buf) VAL=0.5 FALL=1
+.measure tran tplh_b TRIG V(inb) VAL=0.5 FALL=1 TARG V(out_buf) VAL=0.5 RISE=1
+.measure tran avg_delay PARAM='(tphl_a+tplh_a+tphl_b+tplh_b)/4'
+
+* 4. Energy per transition
+.measure tran energy_total INTEG P(Vdd) FROM=0n TO=20n
+.measure tran avg_power PARAM='energy_total/20n'
+
+* 5. Leakage current in different states
+.measure dc Ileak_00 FIND I(Vdd) WHEN V(ina)=0 V(inb)=0 ; Output = 0
+.measure dc Ileak_01 FIND I(Vdd) WHEN V(ina)=0 V(inb)=1 ; Output = 1
+.measure dc Ileak_10 FIND I(Vdd) WHEN V(ina)=1 V(inb)=0 ; Output = 1
+.measure dc Ileak_11 FIND I(Vdd) WHEN V(ina)=1 V(inb)=1 ; Output = 0
+
+* 6. Short circuit current analysis
+.measure tran Isc_peak MAX I(Vdd) FROM=0n TO=10n
+.measure tran Isc_avg AVG I(Vdd) FROM=0n TO=10n
+
+* 7. Transmission gate Ron analysis
+.measure dc Ron_tg_on PARAM='1/gm(M5)' ; TG on-resistance when passing
+
+* 8. Input loading analysis (XOR has high input capacitance)
+.measure dc Cin_a PARAM='Cgs(M1)+Cgs(M2)' ; Input cap at A
+.measure dc Cin_b PARAM='Cgs(M3)+Cgs(M4)' ; Input cap at B
+
+* 9. Internal node activity factor
+.measure tran Vina_bar_transitions DERIV V(ina_bar)
+.measure tran Vinb_bar_transitions DERIV V(inb_bar)
+
+* 10. Contention current in transmission gates
+.measure tran Itg_conflict MAX I(M5:d)-I(M7:d) FROM=0n TO=10n
+
+* ================================================================
+* CONTROL SECTION - Power Analysis Plots
+* ================================================================
+.control
+    * Run DC analysis for leakage
+    dc Vina 0 1 1 Vinb 0 1 1 sweep Wp 1 5 1
+    
+    * Plot leakage current vs sizing
+    plot I(Vdd) vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Leakage Current (A)' title 'XOR2 Leakage vs Sizing'
+    
+    * Calculate static power
+    let Pstatic = V(vdd) * I(Vdd)
+    plot Pstatic vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Static Power (W)' title 'XOR2 Static Power vs Sizing'
+    
+    * VTC for both inputs (XOR has symmetric behavior)
+    dc Vina 0 1 0.01 Vinb 0 0 1 sweep Wp 1 5 1
+    plot V(out_buf) vs V(ina) xlabel 'Vin_A (V)' ylabel 'Vout (V)' title 'XOR2 VTC (B=0)'
+    
+    dc Vina 0 1 0.01 Vinb 1 1 1 sweep Wp 1 5 1
+    plot V(out_buf) vs V(ina) xlabel 'Vin_A (V)' ylabel 'Vout (V)' title 'XOR2 VTC (B=1)'
+    
+    * Plot complementary signals
+    dc Vina 0 1 0.01 sweep Wp 1 5 1
+    plot V(ina) V(ina_bar) xlabel 'Vin_A (V)' ylabel 'Voltage (V)' title 'Complementary Signal A'
+    
+    * Internal node voltages
+    dc Vina 0 1 0.01 Vinb 0 1 0.5 sweep Wp 1 5 1
+    plot V(out) vs V(ina) xlabel 'Vin_A (V)' ylabel 'Internal Out (V)' title 'Transmission Gate Output'
+    
+    * Run transient for dynamic power (uncomment pulse sources above)
+    * tran 10p 20n sweep Wp 1 5 1
+    * plot V(out_buf) V(ina) V(inb) xlabel 'Time (s)' ylabel 'Voltage (V)' title 'XOR2 Transient'
+    * plot V(ina_bar) V(inb_bar) xlabel 'Time (s)' ylabel 'Complementary Signals (V)'
+    * let Pdynamic = V(vdd) * I(Vdd)
+    * plot Pdynamic xlabel 'Time (s)' ylabel 'Dynamic Power (W)' title 'Instantaneous Power'
+    
+    * Current distribution
+    * let I_inverters = I(M1:d)+I(M2:d)+I(M3:d)+I(M4:d)
+    * let I_tgates = I(M5:d)+I(M6:d)+I(M7:d)+I(M8:d)
+    * let I_buffer = I(M9:d)+I(M10:d)
+    * plot I_inverters I_tgates I_buffer xlabel 'Time (s)' ylabel 'Stage Current (A)'
+    
+    * Print power metrics
+    print Ileak_00 Ileak_01 Ileak_10 Ileak_11
+    print avg_power energy_total
+    
+    * Power-Delay Product
+    * let PDP = avg_power * avg_delay
+    * print PDP avg_delay
+    
+    * Transmission gate resistance
+    * print Ron_tg_on
+    
+.endc
+
+* ================================================================
+* OPTIMIZATION GUIDELINES for 2-Input XOR Gate:
+* 
+* XOR IS FUNDAMENTALLY DIFFERENT FROM OTHER GATES:
+* 
+* UNIQUE CHARACTERISTICS:
+* 1. **No Direct CMOS Implementation**:
+*    - Basic gates (NAND, NOR, INV) have complementary networks
+*    - XOR requires multiple stages or transmission gates
+*    - Minimum 12 transistors (TG-based) vs 4 for NAND/NOR
+* 
+* 2. **High Input Capacitance**:
+*    - Each input drives multiple gates
+*    - Input A: drives 2 inverter inputs + 2 TG controls
+*    - Input B: drives 2 inverter inputs + 2 TG inputs
+*    - Total input load ~4× that of basic gate
+* 
+* 3. **Complementary Signal Generation**:
+*    - Must generate A' and B' (2 inverters)
+*    - These consume static and dynamic power
+*    - Add propagation delay
+*    - Generate internal switching activity
+* 
+* 4. **Transmission Gate Behavior**:
+*    - Not full rail-to-rail drivers
+*    - On-resistance Ron affects speed
+*    - Charge sharing between TGs can cause glitches
+*    - Weak output drive (needs buffer)
+* 
+* 5. **High Activity Factor**:
+*    - XOR output toggles for 50% of input transitions
+*    - Internal nodes (A', B') also toggle frequently
+*    - Much higher dynamic power than NAND/NOR
+* 
+* POWER CHALLENGES:
+* 1. **Static Power**:
+*    - 12 transistors = more leakage paths
+*    - Two input inverters always active
+*    - One TG path always conducting (depending on inputs)
+*    - Leakage varies significantly with input pattern
+* 
+* 2. **Dynamic Power Components**:
+*    a) Input inverters: Switch on every input transition
+*    b) Transmission gates: Switching and Ron losses
+*    c) Output buffer: Drives load capacitance
+*    d) Internal nodes: Multiple parasitic caps switching
+*    - Total dynamic power 3-4× basic gate
+* 
+* 3. **Short-Circuit Current**:
+*    - Occurs in input inverters
+*    - Occurs in output buffer
+*    - TG switching can cause momentary contention
+* 
+* SIZING STRATEGIES:
+* 1. **Input Inverters (M1-M4)**:
+*    - Need fast response (drive TG controls)
+*    - Moderate sizing: Wp=1-2, Wn=1
+*    - Don't oversize (increases input cap)
+* 
+* 2. **Transmission Gates (M5-M8)**:
+*    - Critical for speed and power
+*    - Large TG: Lower Ron, faster, but more leakage
+*    - Small TG: Higher Ron, slower, less leakage
+*    - Typical: Wp_tg=1.5-2, Wn_tg=1-1.5
+*    - Balance PMOS/NMOS for symmetric Ron
+* 
+* 3. **Output Buffer (M9-M10)**:
+*    - Must drive load capacitance
+*    - Size based on load: Larger load → larger buffer
+*    - Typical: Wp=2-3, Wn=1.5-2
+* 
+* 4. **Overall Balance**:
+*    - Input stages: Fast but low power
+*    - TG core: Optimize Ron vs leakage
+*    - Output buffer: Size for load
+* 
+* OPTIMIZATION FOR DIFFERENT GOALS:
+* 
+* A) **MINIMUM POWER** (Low performance OK):
+*    - Wp=0.5-1, Wn=0.5-1 (all stages)
+*    - Wp_tg=1, Wn_tg=1
+*    - Reduce buffer size if load allows
+*    - Trade-off: Slow, high Ron, potential glitches
+* 
+* B) **BALANCED** (Typical applications):
+*    - Wp=1-2, Wn=1 (inverters)
+*    - Wp_tg=1.5-2, Wn_tg=1-1.5 (TGs)
+*    - Wp=2-3, Wn=1.5-2 (buffer)
+*    - Good compromise of speed and power
+* 
+* C) **HIGH SPEED** (Power less critical):
+*    - Wp=2-3, Wn=1.5-2 (inverters)
+*    - Wp_tg=3-4, Wn_tg=2-3 (TGs, low Ron)
+*    - Wp=3-5, Wn=2-4 (buffer, strong drive)
+*    - Trade-off: High power, large area
+* 
+* ALTERNATIVE IMPLEMENTATIONS:
+* 
+* 1. **NAND-Based XOR** (14-16 transistors):
+*    - More robust to noise
+*    - Full rail-to-rail operation
+*    - Slower (more stages)
+*    - Higher power (more transistors)
+* 
+* 2. **Pass Transistor XOR** (8-10 transistors):
+*    - Fewer transistors
+*    - Very weak output drive
+*    - Threshold voltage drops
+*    - Not recommended for modern designs
+* 
+* 3. **AOI/OAI Complex Gates** (10-12 transistors):
+*    - XOR = (A+B)(A'+B') in single complex gate
+*    - Moderate transistor count
+*    - Good performance
+*    - Complex layout
+* 
+* COMPARISON: TG-based vs NAND-based
+* - TG-based: Faster, fewer transistors, needs careful design
+* - NAND-based: Slower, more area, more robust, easier design
+* - Choice depends on: speed requirements, power budget, design complexity
+* 
+* KEY MEASUREMENTS FOR XOR:
+* 1. Delay from both inputs (should be symmetric)
+* 2. Input capacitance (affects driving stage)
+* 3. TG on-resistance (affects speed)
+* 4. Activity factor on internal nodes
+* 5. Leakage in all 4 input states
+* 6. Power-delay product comparison with alternatives
+* 
+* SPECIAL CONSIDERATIONS:
+* 1. **Charge Sharing**: TGs can cause voltage droop
+* 2. **Glitches**: During TG switching transitions
+* 3. **Input Sensitivity**: High input cap affects timing
+* 4. **Temperature**: TG Ron varies significantly with temp
+* 5. **Process Variation**: TG balance sensitive to mismatch
+* 
+* PRACTICAL RECOMMENDATIONS:
+* - For most applications: Use TG-based (shown here)
+* - For high noise environments: Use NAND-based
+* - For ultra-low power: Consider approximate XOR or lookup table
+* - For high speed: Consider differential XOR circuits
+* - Always include output buffer for load driving
+* - Carefully balance PMOS/NMOS in TGs
+* 
+* POWER BREAKDOWN (Typical):
+* - Input inverters: 20-25% of total power
+* - Transmission gates: 30-40% of total power
+* - Output buffer: 25-35% of total power
+* - Internal parasitics: 10-15% of total power
+* ================================================================
+
+.end

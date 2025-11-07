@@ -1,0 +1,175 @@
+* CMOS 3-Input AND Gate with Power Optimization Analysis
+* Implementation: NAND3 followed by Inverter
+* Define the technology model parameters
+*.model nmos_rvt nmos 
+*.model pmos_rvt pmos
+.include p05_cmos_models_tt_1.inc
+
+* Define parameters for transistor sizing
+.param Wp=1 ; PMOS width parameter for NAND3
+.param Wn=1 ; NMOS width parameter for NAND3
+.param Wp_inv=1 ; PMOS width for inverter
+.param Wn_inv=1 ; NMOS width for inverter
+
+* Circuit elements
+Vdd vdd 0 DC 1V ; Power supply voltage
+Vina ina 0 DC 0 ; Input A voltage
+Vinb inb 0 DC 0 ; Input B voltage
+Vinc inc 0 DC 0 ; Input C voltage
+
+* ================================================================
+* NAND3 STAGE
+* ================================================================
+* PMOS transistors (parallel - pull-up network)
+M1 nand_out ina vdd vdd pfet nfin='Wp' ; PMOS transistor A
+M2 nand_out inb vdd vdd pfet nfin='Wp' ; PMOS transistor B
+M3 nand_out inc vdd vdd pfet nfin='Wp' ; PMOS transistor C
+
+* NMOS transistors (series - pull-down network)
+M4 nand_out ina n1 0 nfet nfin='Wn' ; NMOS transistor A (top)
+M5 n1 inb n2 0 nfet nfin='Wn' ; NMOS transistor B (middle)
+M6 n2 inc 0 0 nfet nfin='Wn' ; NMOS transistor C (bottom)
+
+* Internal node capacitance
+Cint nand_out 0 0.5pF ; Internal node capacitor
+
+* ================================================================
+* INVERTER STAGE
+* ================================================================
+* PMOS transistor (pull-up)
+M7 out nand_out vdd vdd pfet nfin='Wp_inv' ; Inverter PMOS
+
+* NMOS transistor (pull-down)
+M8 out nand_out 0 0 nfet nfin='Wn_inv' ; Inverter NMOS
+
+* Load capacitance
+Cload out 0 1pF ; Output load capacitor
+
+* ================================================================
+* POWER OPTIMIZATION ANALYSES
+* ================================================================
+
+* 1. Static Power Analysis - Leakage current measurement
+* Sweep all 8 input combinations (000 to 111)
+.dc Vina 0 1 1 Vinb 0 1 1 Vinc 0 1 1 sweep Wp 1 5 1
+
+* 2. Dynamic Power Analysis - Transient with activity
+.param trise=100p
+.param tper=4n
+.tran 10p 40n sweep Wp 1 5 1
+
+* Pulse inputs for switching activity (staggered for all combinations)
+.param pulse_en=0 ; Set to 1 for transient, 0 for DC
+Vina ina 0 DC 0 ; Default DC
+Vinb inb 0 DC 0 ; Default DC
+Vinc inc 0 DC 0 ; Default DC
+*Vina ina 0 PULSE(0 1 0 'trise' 'trise' 'tper/2' 'tper')
+*Vinb inb 0 PULSE(0 1 'tper/4' 'trise' 'trise' 'tper' '2*tper')
+*Vinc inc 0 PULSE(0 1 'tper/2' 'trise' 'trise' '2*tper' '4*tper')
+
+* 3. Power-Delay Product Analysis
+* Measure propagation delays
+.measure tran tphl_a TRIG V(ina) VAL=0.5 RISE=1 TARG V(out) VAL=0.5 FALL=1
+.measure tran tplh_a TRIG V(ina) VAL=0.5 FALL=1 TARG V(out) VAL=0.5 RISE=1
+.measure tran avg_delay PARAM='(tphl_a+tplh_a)/2'
+
+* 4. Energy per transition
+.measure tran energy_total INTEG P(Vdd) FROM=0n TO=40n
+.measure tran avg_power PARAM='energy_total/40n'
+
+* 5. Leakage current in different states (sample key states)
+.measure dc Ileak_000 FIND I(Vdd) WHEN V(ina)=0 V(inb)=0 V(inc)=0
+.measure dc Ileak_001 FIND I(Vdd) WHEN V(ina)=0 V(inb)=0 V(inc)=1
+.measure dc Ileak_011 FIND I(Vdd) WHEN V(ina)=0 V(inb)=1 V(inc)=1
+.measure dc Ileak_111 FIND I(Vdd) WHEN V(ina)=1 V(inb)=1 V(inc)=1
+
+* 6. Short circuit current analysis
+.measure tran Isc_peak MAX I(Vdd) FROM=0n TO=20n
+.measure tran Isc_avg AVG I(Vdd) FROM=0n TO=20n
+
+* 7. Stage-specific power analysis
+.measure tran Inand_avg AVG I(M1:d)+I(M2:d)+I(M3:d) FROM=0n TO=40n
+.measure tran Iinv_avg AVG I(M7:d) FROM=0n TO=40n
+
+* 8. Series resistance analysis (important for 3-stacked NMOS)
+.measure dc Ron_nmos PARAM='1/gm(M4)' ; Approximate on-resistance
+
+* ================================================================
+* CONTROL SECTION - Power Analysis Plots
+* ================================================================
+.control
+    * Run DC analysis for leakage across all input combinations
+    dc Vina 0 1 1 Vinb 0 1 1 Vinc 0 1 1 sweep Wp 1 5 1
+    
+    * Plot leakage current vs sizing
+    plot I(Vdd) vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Leakage Current (A)' title 'AND3 Leakage vs Sizing'
+    
+    * Calculate static power for each configuration
+    let Pstatic = V(vdd) * I(Vdd)
+    plot Pstatic vs Wp xlabel 'PMOS Width (nfin)' ylabel 'Static Power (W)' title 'AND3 Static Power vs Sizing'
+    
+    * VTC for single input (others held high) - noise margin analysis
+    dc Vina 0 1 0.01 Vinb 1 1 1 Vinc 1 1 1 sweep Wp 1 5 1
+    plot V(out) vs V(ina) xlabel 'Vin (V)' ylabel 'Vout (V)' title 'AND3 VTC - Power vs Performance'
+    
+    * Plot internal node voltage (NAND output)
+    plot V(nand_out) vs V(ina) xlabel 'Vin (V)' ylabel 'V_nand (V)' title 'NAND3 Stage Output'
+    
+    * Run transient for dynamic power (uncomment pulse sources above)
+    * tran 10p 40n sweep Wp 1 5 1
+    * plot V(out) V(ina) V(inb) V(inc) xlabel 'Time (s)' ylabel 'Voltage (V)'
+    * plot V(nand_out) xlabel 'Time (s)' ylabel 'Internal Node (V)'
+    * let Pdynamic = V(vdd) * I(Vdd)
+    * plot Pdynamic xlabel 'Time (s)' ylabel 'Dynamic Power (W)'
+    
+    * Current distribution between stages
+    * let I_nand3 = I(M1:d)+I(M2:d)+I(M3:d)
+    * let I_inv = I(M7:d)
+    * plot I_nand3 I_inv xlabel 'Time (s)' ylabel 'Stage Current (A)'
+    
+    * Print power metrics
+    print Ileak_000 Ileak_001 Ileak_011 Ileak_111
+    print avg_power energy_total
+    
+    * Power-Delay Product calculation
+    * let PDP = avg_power * avg_delay
+    * print PDP avg_delay
+    
+    * Series resistance impact
+    * print Ron_nmos
+    
+.endc
+
+* ================================================================
+* OPTIMIZATION GUIDELINES for 3-Input AND Gate:
+* 
+* CRITICAL: Series NMOS stack (3 transistors) creates issues:
+* 1. Higher series resistance → slower pull-down
+* 2. Intermediate nodes (n1, n2) can cause additional delay
+* 3. Body effect on stacked transistors increases Vth
+*
+* OPTIMIZATION STRATEGIES:
+* 1. Increase Wn (NMOS width) to compensate for series resistance
+*    - Typically use Wn = 1.5x to 2x of single NMOS
+* 2. Minimize Wp for lower leakage (3 parallel PMOS leak more)
+* 3. Size inverter stage properly:
+*    - Wp_inv/Wn_inv ratio affects final stage delay/power
+*    - Balance load driving capability with power
+* 4. Consider internal node capacitance Cint
+*    - Affects intermediate switching and short-circuit current
+* 5. Power distribution:
+*    - NAND3 stage: Higher static power (3 PMOS leakage paths)
+*    - Inverter stage: Fast switching, watch dynamic power
+* 6. For minimum power: Reduce all transistor sizes
+*    - Trade-off: Increased delay, reduced noise margin
+* 7. For minimum delay: Increase Wn significantly
+*    - Trade-off: Higher dynamic power (Pdyn ∝ C ∝ W)
+* 8. Optimal PDP: Usually at moderate sizing (Wp=2-3, Wn=2-4)
+*
+* MEASUREMENT FOCUS:
+* - Compare leakage in state 111 (all high) vs 000 (all low)
+* - Series NMOS resistance: limits pull-down speed
+* - Internal node voltage swing: affects power in both stages
+* ================================================================
+
+.end
