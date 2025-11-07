@@ -1,0 +1,36 @@
+* CMOS Inverter with Parametric Analysis
+* Define the technology model parameters
+*.model nmos_rvt nmos 
+*.model pmos_rvt pmos
+.include p05_cmos_models_tt_1.inc
+
+* Define parameter for PMOS width
+.param Wp=1
+
+* Circuit elements
+Vdd vdd 0 DC 1V ; Power supply voltage
+Vin in 0 DC 0 ; Input voltage (DC source for DC sweep)
+
+* Transistor instances
+M1 out in vdd vdd pfet nfin='Wp' ; PMOS transistor (parametric width)
+M2 out in 0 0 nfet  ; NMOS transistor
+
+* Load capacitance
+Cload out 0 1pF ; Load capacitor
+
+* DC Analysis with parametric sweep
+.dc Vin 0 1 0.01 sweep Wp 1 5 1 ; Sweep Vin from 0 to 1V, vary Wp from 120nm to 480nm
+
+* Transient analysis (optional - commented out for parametric analysis)
+*.tran 1n 100n ; Transient analysis for 100 ns
+
+.control
+    run ; Run the simulation
+    plot V(out) vs V(in) ; Plot VTC for all Wn values
+    * Alternative: plot output voltage vs input voltage with labels
+    * set color0=white
+    * set color1=black
+    * plot V(out) vs V(in) xlabel 'Vin (V)' ylabel 'Vout (V)' title 'VTC for different Wn values'
+.endc
+
+.end

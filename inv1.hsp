@@ -1,0 +1,82 @@
+* CMOS Inverter with Power Analysis
+.include p05_cmos_models_tt_1.inc
+
+* Global parameters
+.param VDD=1.0
+.param Wp=2u
+.param Wn=1u
+.param L=50n
+.param Cload=10f
+.param Tperiod=20n
+.param Ton=10n
+.param freq = 1/(Tperiod)
+
+* Power rails and input
+Vdd vdd 0 DC {VDD}
+* Input is a periodic pulse toggling the inverter every Tperiod/2 (50% duty)
+Vin in 0 PULSE(0 {VDD} 1n {Tperiod/100} {Tperiod/100} {Ton} {Tperiod})
+
+* Loads and devices (simple inverter)
+M1 out in vdd vdd pmos W={Wp} L={L}
+M2 out in 0 0 nmos W={Wn} L={L}
+Cload out 0 {Cload}
+
+* DC sweep to get leakage characteristics across Vin
+.dc Vin 0 {VDD} 0.01
+* Measure min and max supply current across the DC sweep (gives leakage extremes)
+.measure DC Idd_min MIN I(Vdd)
+.measure DC Idd_max MAX I(Vdd)
+* Compute static (leakage) power extremes = VDD * Idd_min/max
+.measure DC P_static_min PARAM='V(vdd)*I_dd_min' 
+.measure DC P_static_max PARAM='V(vdd)*I_dd_max'
+
+* Transient analysis to capture dynamic and short-circuit energy.
+.tran 0.1n 200n uic
+
+.control
+    run
+    * Plot some basic waveforms
+    plot V(out) V(in) I(Vdd)
+.endc
+
+* --- Power measurements in transient ---
+* Average supply power over the steady portion of the transient
+* Pick a time window after the first few cycles to avoid startup effects.
+.measure TRAN P_avg AVG POWER FROM=40n TO=200n
+
+* Total energy drawn from Vdd over the same window (E_total = integral of P dt)
+* Many HSPICE variants accept the INTEG keyword inside a PARAM expression:
+.measure TRAN E_total PARAM='-INTEG(I(Vdd) FROM=40n TO=200n)*V(vdd)'
+
+* Analytical capacitive (dynamic switching) energy per full transition:
+* E_cap = 0.5 * Cload * Vdd^2
+.measure TRAN E_cap PARAM='0.5*{Cload}*V(vdd)**2'
+
+* Dynamic power (approx) = E_cap * switching_frequency * activity_factor
+* If input toggles every period (activity = 1 toggles per period), use freq above:
+.measure TRAN P_dynamic_est PARAM='E_cap*{freq}'
+
+* Short-circuit energy estimate:
+* E_short = E_total - (P_static_avg * (time_window)) - E_cap*#transitions
+* We'll compute short-circuit energy per window by subtracting static energy and capacitive energy.
+* First measure average supply current (to get static current contribution) over the window
+.measure TRAN I_supply_avg AVG I(Vdd) FROM=40n TO=200n
+.measure TRAN P_static_avg PARAM='V(vdd)*I_supply_avg'
+
+* Number of switching events in the measurement window (approx): window_time / Tperiod
+.measure TRAN window_time PARAM='(200e-9 - 40e-9)'
+.measure TRAN n_transitions PARAM='window_time/{Tperiod}'
+
+* Total capacitive energy consumed in the window
+.measure TRAN E_cap_total PARAM='E_cap*n_transitions'
+
+* Energy due to static current in the window
+.measure TRAN E_static_window PARAM='P_static_avg*window_time'
+
+* Estimated short-circuit energy in the window
+.measure TRAN E_short_est PARAM='E_total - E_cap_total - E_static_window'
+
+* Average short-circuit power in the window
+.measure TRAN P_short_avg PARAM='E_short_est/window_time'
+
+.end
